@@ -1148,7 +1148,10 @@ class Interconnect(object):
                 if connection_info.connection_type == \
                         ConnectionType.OUTBOUND_CONNECTION:
                     connection_info.connection.stop()
-                    del self._connections[connection_id]
+                    try:
+                        del self._connections[connection_id]
+                    except KeyError:
+                        LOGGER.warn("Attempted to delete %s from self._connections, but it wasn't there",connection_id)
 
                 elif connection_info.connection_type == \
                         ConnectionType.ZMQ_IDENTITY:
