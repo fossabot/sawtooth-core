@@ -61,7 +61,7 @@ node ('master') {
         // Set the ISOLATION_ID environment variable for the whole pipeline
         env.ISOLATION_ID = sh(returnStdout: true, script: 'printf $BUILD_TAG | sha256sum | cut -c1-64').trim()
 	env.ORGANIZATION = 'blockchaintp'
-	env.VERSION = sh(returnStdout: true, script: 'bin/get_version').trime()
+	env.VERSION = sh(returnStdout: true, script: 'bin/get_version').trim()
 	
 	stage("Clean All Previous Images") {
 	    steps {
