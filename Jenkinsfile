@@ -60,7 +60,15 @@ node ('master') {
 
         // Set the ISOLATION_ID environment variable for the whole pipeline
         env.ISOLATION_ID = sh(returnStdout: true, script: 'printf $BUILD_TAG | sha256sum | cut -c1-64').trim()
-
+	env.ORGANIZATION = 'blockchaintp'
+	env.VERSION = sh(returnStdout: true, script: 'bin/get_version').trime()
+	
+	stage("Clean All Previous Images") {
+	    steps {
+		sh "btp-scripts/clean_images ${ISOLATION_ID}"
+	    }
+	}
+	
         // Use a docker container to build and protogen, so that the Jenkins
         // environment doesn't need all the dependencies.
         stage("Build Test Dependencies") {
@@ -107,5 +115,20 @@ node ('master') {
             archiveArtifacts artifacts: 'coverage/html/*'
             archiveArtifacts artifacts: 'docs/build/html/**, docs/build/latex/*.pdf'
         }
+	// Push Docker images
+	stage("Tag Push images") {
+	    steps {
+		withCredentials([usernamePassword(credentialsId: 'dockerHubID', usernameVariable: 'DOCKER_USER',passwordVariable: 'DOCKER_PASSWD')]) {
+		    sh "docker login -u $DOCKER_USER --password=$DOCKER_PASSWD"
+		    sh "btp-scripts/tag_and_push_images ${ISOLATION_ID} ${ORGANIZATION} ${VERSION}"
+		}
+	    }
+	}
+	stage("Clean All Previous Images") {
+	    steps {
+		sh "btp-scripts/clean_images ${ISOLATION_ID}"
+	    }
+	}
+
     }
 }
