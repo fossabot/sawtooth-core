@@ -28,16 +28,6 @@ node ('master') {
             sh 'git fetch --tags'
         }
 
-	if (!(env.CHANGE_AUTHOR)) {
-	    env.CHANGE_AUTHOR='jenkins'
-        }
-
-        if (!(env.BRANCH_NAME == '1-0' && env.JOB_BASE_NAME == '1-0') && !(env.BRANCH_NAME ==~ /1-0-staging-\d{2}/ && env.JOB_BASE_NAME ==~ /1-0-staging-\d{2}/)) {
-            stage("Check Whitelist") {
-                readTrusted 'bin/whitelist'
-                sh './bin/whitelist "$CHANGE_AUTHOR" /etc/jenkins-authorized-builders'
-            }
-        }
 
         stage("Check for Signed-Off Commits") {
             sh '''#!/bin/bash -l
@@ -74,7 +64,7 @@ node ('master') {
 	
         // Use a docker container to build and protogen, so that the Jenkins
         // environment doesn't need all the dependencies.
-        stage("Build Test Dependencies") {
+        stage("Build Installed Docker Images") {
             sh './bin/build_all installed'
         }
 
@@ -121,7 +111,7 @@ node ('master') {
 	
 	// Push Docker images
 	if ( env.BRANCH_NAME =~ /btp-releases/ ) {
-	    stage("Tag Push images") {
+	    stage("Tag and Publish images") {
 		withCredentials([usernamePassword(credentialsId: 'dockerHubID', usernameVariable: 'DOCKER_USER',passwordVariable: 'DOCKER_PASSWD')]) {
 		    sh "docker login -u $DOCKER_USER --password=$DOCKER_PASSWD"
 		    sh "btp-scripts/tag_and_push_images ${ISOLATION_ID} ${ORGANIZATION} ${VERSION}"
