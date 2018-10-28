@@ -28,6 +28,10 @@ node ('master') {
             sh 'git fetch --tags'
         }
 
+	if (!(env.CHANGE_AUTHOR)) {
+	    env.CHANGE_AUTHOR='jenkins'
+        }
+
         if (!(env.BRANCH_NAME == '1-0' && env.JOB_BASE_NAME == '1-0') && !(env.BRANCH_NAME ==~ /1-0-staging-\d{2}/ && env.JOB_BASE_NAME ==~ /1-0-staging-\d{2}/)) {
             stage("Check Whitelist") {
                 readTrusted 'bin/whitelist'
@@ -114,13 +118,17 @@ node ('master') {
             archiveArtifacts artifacts: 'coverage/html/*'
             archiveArtifacts artifacts: 'docs/build/html/**, docs/build/latex/*.pdf'
         }
+	
 	// Push Docker images
-	stage("Tag Push images") {
+	if ( env.BRANCH_NAME =~ /btp-releases/ ) {
+	    stage("Tag Push images") {
 		withCredentials([usernamePassword(credentialsId: 'dockerHubID', usernameVariable: 'DOCKER_USER',passwordVariable: 'DOCKER_PASSWD')]) {
 		    sh "docker login -u $DOCKER_USER --password=$DOCKER_PASSWD"
 		    sh "btp-scripts/tag_and_push_images ${ISOLATION_ID} ${ORGANIZATION} ${VERSION}"
 		}
+	    }
 	}
+	
 	stage("Clean All Previous Images") {
 		sh "btp-scripts/clean_images ${ISOLATION_ID}"
 	}
