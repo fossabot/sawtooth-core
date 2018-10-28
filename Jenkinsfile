@@ -64,6 +64,7 @@ node ('master') {
 	env.VERSION = sh(returnStdout: true, script: 'bin/get_version').trim()
 	
 	stage("Clean All Previous Images") {
+	        sh" env"
 		sh "btp-scripts/clean_images ${ISOLATION_ID}"
 	}
 	
