@@ -18,7 +18,7 @@
 // Discard old builds after 31 days
 properties([[$class: 'BuildDiscarderProperty', strategy:
         [$class: 'LogRotator', artifactDaysToKeepStr: '',
-        artifactNumToKeepStr: '', daysToKeepStr: '31', numToKeepStr: '']]]);
+        artifactNumToKeepStr: '', daysToKeepStr: '7', numToKeepStr: '']]]);
 
 node ('master') {
     // Create a unique workspace so Jenkins doesn't reuse an existing one
@@ -28,12 +28,6 @@ node ('master') {
             sh 'git fetch --tags'
         }
 
-        if (!(env.BRANCH_NAME == '1-0' && env.JOB_BASE_NAME == '1-0') && !(env.BRANCH_NAME ==~ /1-0-staging-\d{2}/ && env.JOB_BASE_NAME ==~ /1-0-staging-\d{2}/)) {
-            stage("Check Whitelist") {
-                readTrusted 'bin/whitelist'
-                sh './bin/whitelist "$CHANGE_AUTHOR" /etc/jenkins-authorized-builders'
-            }
-        }
 
         stage("Check for Signed-Off Commits") {
             sh '''#!/bin/bash -l
@@ -59,13 +53,26 @@ node ('master') {
         }
 
         // Set the ISOLATION_ID environment variable for the whole pipeline
-        env.ISOLATION_ID = sh(returnStdout: true, script: 'printf $BUILD_TAG | sha256sum | cut -c1-64').trim()
-
+        env.ISOLATION_ID = sh(returnStdout: true, script: 'echo $BUILD_TAG | sha256sum | cut -c1-64').trim()
+	env.ORGANIZATION = 'blockchaintp'
+	env.VERSION = sh(returnStdout: true, script: 'bin/get_version').trim()
+	
+	stage("Clean All Previous Images") {
+	        sh" env"
+		sh "btp-scripts/clean_images ${ISOLATION_ID}"
+	}
+	
         // Use a docker container to build and protogen, so that the Jenkins
         // environment doesn't need all the dependencies.
-        stage("Build Test Dependencies") {
-            sh './bin/build_all installed'
-        }
+	try {
+            stage("Build Installed Docker Images") {
+		sh './bin/build_all installed'
+            }
+	} catch (exc) {
+	    sh "btp-scripts/clean_images ${ISOLATION_ID}"
+	    throw exc
+	}
+	    
 
         stage("Run Lint") {
             sh 'docker run --rm -v $(pwd):/project/sawtooth-core sawtooth-dev-python:$ISOLATION_ID run_lint'
@@ -77,9 +84,13 @@ node ('master') {
         }
 
         // Run the tests
-        stage("Run Tests") {
-            sh './bin/run_tests -i deployment'
-        }
+	try {
+            stage("Run Tests") {
+		sh './bin/run_tests -i deployment'
+            }
+	} catch (exc) {
+	    currentBuild.result = 'UNSTABLE'
+	}
 
         stage("Compile coverage report") {
             sh 'docker run --rm -v $(pwd):/project/sawtooth-core sawtooth-dev-python:$ISOLATION_ID /bin/bash -c "cd coverage && coverage combine && coverage html -d html"'
@@ -107,5 +118,20 @@ node ('master') {
             archiveArtifacts artifacts: 'coverage/html/*'
             archiveArtifacts artifacts: 'docs/build/html/**, docs/build/latex/*.pdf'
         }
+	
+	// Push Docker images
+	if ( env.BRANCH_NAME =~ /btp-releases/ ) {
+	    stage("Tag and Publish images") {
+		withCredentials([usernamePassword(credentialsId: 'dockerHubID', usernameVariable: 'DOCKER_USER',passwordVariable: 'DOCKER_PASSWD')]) {
+		    sh "docker login -u $DOCKER_USER --password=$DOCKER_PASSWD"
+		    sh "btp-scripts/tag_and_push_images ${ISOLATION_ID} ${ORGANIZATION} ${VERSION}"
+		}
+	    }
+	}
+	
+	stage("Clean All Previous Images") {
+		sh "btp-scripts/clean_images ${ISOLATION_ID}"
+	}
+
     }
 }
