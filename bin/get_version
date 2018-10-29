@@ -33,6 +33,10 @@ def bump_version(version):
         parts = patch.split('rc')
         parts[1] = str(int(parts[1]) + 1)
         patch = "rc".join(parts)
+    elif 'btp' in patch:
+        parts = patch.split('btp')
+        parts[1] = str(int(parts[1]) + 1)
+        patch = "btp".join(parts)
     else:
         patch = str(int(patch) + 1)
     return ".".join([major, minor, patch])
