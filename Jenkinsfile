@@ -64,9 +64,15 @@ node ('master') {
 	
         // Use a docker container to build and protogen, so that the Jenkins
         // environment doesn't need all the dependencies.
-        stage("Build Installed Docker Images") {
-            sh './bin/build_all installed'
-        }
+	try {
+            stage("Build Installed Docker Images") {
+		sh './bin/build_all installed'
+            }
+	} catch (exc) {
+	    sh "btp-scripts/clean_images ${ISOLATION_ID}"
+	    throw
+	}
+	    
 
         stage("Run Lint") {
             sh 'docker run --rm -v $(pwd):/project/sawtooth-core sawtooth-dev-python:$ISOLATION_ID run_lint'
@@ -78,9 +84,13 @@ node ('master') {
         }
 
         // Run the tests
-        stage("Run Tests") {
-            sh './bin/run_tests -i deployment'
-        }
+	try {
+            stage("Run Tests") {
+		sh './bin/run_tests -i deployment'
+            }
+	} catch (exc) {
+	    currentBuild.result = 'UNSTABLE'
+	}
 
         stage("Compile coverage report") {
             sh 'docker run --rm -v $(pwd):/project/sawtooth-core sawtooth-dev-python:$ISOLATION_ID /bin/bash -c "cd coverage && coverage combine && coverage html -d html"'
