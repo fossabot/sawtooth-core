@@ -24,6 +24,7 @@ node ('master') {
     // Create a unique workspace so Jenkins doesn't reuse an existing one
     ws("workspace/${env.BUILD_TAG}") {
         stage("Clone Repo") {
+	    deleteDir()
             checkout scm
             sh 'git fetch --tags'
         }
@@ -131,6 +132,7 @@ node ('master') {
 	
 	stage("Clean All Previous Images") {
 		sh "btp-scripts/clean_images ${ISOLATION_ID}"
+		deleteDir()
 	}
 
     }
