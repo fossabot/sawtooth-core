@@ -53,7 +53,7 @@ node ('master') {
         }
 
         // Set the ISOLATION_ID environment variable for the whole pipeline
-        env.ISOLATION_ID = sh(returnStdout: true, script: 'printf $BUILD_TAG | sha256sum | cut -c1-64').trim()
+        env.ISOLATION_ID = sh(returnStdout: true, script: 'echo $BUILD_TAG |sed -e \'s/-[0-9].*$//'| sha256sum | cut -c1-64').trim()
 	env.ORGANIZATION = 'blockchaintp'
 	env.VERSION = sh(returnStdout: true, script: 'bin/get_version').trim()
 	
