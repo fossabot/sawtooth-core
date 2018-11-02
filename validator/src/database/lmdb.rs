@@ -15,8 +15,6 @@
  * ------------------------------------------------------------------------------
  */
 
-#![allow(unknown_lints)]
-
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -79,9 +77,7 @@ impl LmdbDatabase {
             ctx.env.clone(),
             Some("main"),
             &lmdb::DatabaseOptions::new(lmdb::db::CREATE),
-        ).map_err(|err| {
-            DatabaseError::InitError(format!("Failed to open database: {:?}", err))
-        })?;
+        ).map_err(|err| DatabaseError::InitError(format!("Failed to open database: {:?}", err)))?;
 
         let mut index_dbs = HashMap::with_capacity(indexes.len());
         for name in indexes {
@@ -190,8 +186,7 @@ impl<'a> DatabaseReader for LmdbDatabaseReader<'a> {
             .db_stat(&self.db.main)
             .map_err(|err| {
                 DatabaseError::CorruptionError(format!("Failed to get database stats: {}", err))
-            })
-            .map(|stat| stat.entries)
+            }).map(|stat| stat.entries)
     }
 
     fn index_count(&self, index: &str) -> Result<usize, DatabaseError> {
@@ -204,8 +199,7 @@ impl<'a> DatabaseReader for LmdbDatabaseReader<'a> {
             .db_stat(index)
             .map_err(|err| {
                 DatabaseError::CorruptionError(format!("Failed to get database stats: {}", err))
-            })
-            .map(|stat| stat.entries)
+            }).map(|stat| stat.entries)
     }
 }
 
@@ -222,17 +216,20 @@ impl<'a> LmdbDatabaseReaderCursor<'a> {
             .map(|(key, value): (&[u8], &[u8])| (Vec::from(key), Vec::from(value)))
     }
 
-    #[allow(should_implement_trait)]
-    pub fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)> {
-        self.cursor
-            .next(&self.access)
-            .ok()
-            .map(|(key, value): (&[u8], &[u8])| (Vec::from(key), Vec::from(value)))
-    }
-
     pub fn last(&mut self) -> Option<(Vec<u8>, Vec<u8>)> {
         self.cursor
             .last(&self.access)
+            .ok()
+            .map(|(key, value): (&[u8], &[u8])| (Vec::from(key), Vec::from(value)))
+    }
+}
+
+impl<'a> Iterator for LmdbDatabaseReaderCursor<'a> {
+    type Item = (Vec<u8>, Vec<u8>);
+
+    fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)> {
+        self.cursor
+            .next(&self.access)
             .ok()
             .map(|(key, value): (&[u8], &[u8])| (Vec::from(key), Vec::from(value)))
     }
@@ -352,8 +349,7 @@ impl<'a> DatabaseReader for LmdbDatabaseWriter<'a> {
             .db_stat(&self.db.main)
             .map_err(|err| {
                 DatabaseError::CorruptionError(format!("Failed to get database stats: {}", err))
-            })
-            .map(|stat| stat.entries)
+            }).map(|stat| stat.entries)
     }
 
     fn index_count(&self, index: &str) -> Result<usize, DatabaseError> {
@@ -366,8 +362,7 @@ impl<'a> DatabaseReader for LmdbDatabaseWriter<'a> {
             .db_stat(index)
             .map_err(|err| {
                 DatabaseError::CorruptionError(format!("Failed to get database stats: {}", err))
-            })
-            .map(|stat| stat.entries)
+            }).map(|stat| stat.entries)
     }
 }
 

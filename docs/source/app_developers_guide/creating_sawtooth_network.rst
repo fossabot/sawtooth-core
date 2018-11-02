@@ -14,7 +14,7 @@ environment on one of the following platforms:
   `Docker <https://www.docker.com/>`_ containers.
 
 * Ubuntu: Install Sawtooth natively using
-  `Ubuntu 16.04 <https://www.ubuntu.com/>`_. You will add a node to the existing
+  `Ubuntu 16.04 <https://www.ubuntu.com/>`_. You will add a node to an existing
   application development environment that is described in :doc:`ubuntu`, but
   you will delete all existing blockchain data, including the genesis block.
 
@@ -23,8 +23,9 @@ environment on one of the following platforms:
 
 .. note::
 
-   The guides in this chapter set up an environment with five Sawtooth validator
-   nodes. For a single-node environment, see :doc:`installing_sawtooth`.
+   The guides in this chapter set up an environment with multiple Sawtooth
+   validator nodes. For a single-node environment, see
+   :doc:`installing_sawtooth`.
 
 To get started, choose the guide for the platform of your choice:
 
@@ -84,10 +85,10 @@ About the Sawtooth Network Environment
 
 The following figure shows an example network with two validator nodes:
 
-.. figure:: ../images/appdev-environment-two-nodes.*
+.. figure:: ../images/appdev-environment-multi-node.*
    :width: 100%
    :align: center
-   :alt: Application development environment with two nodes
+   :alt: Docker: Sawtooth network with five nodes
 
 Like the single-node environment, this environment uses serial transaction
 processing and static peering. However, it has the following differences:
@@ -98,7 +99,7 @@ processing and static peering. However, it has the following differences:
   Software Guard Extensions (SGX) to implement a leader-election lottery system.
   PoET simulator provides the same consensus algorithm on an SGX simulator.
 
-* An additional transaction processor, Validator Registry, which handles PoET
+* An additional transaction processor, PoET Validator Registry, handles PoET
   settings for a multiple-node network.
 
 Prerequisites
@@ -119,7 +120,7 @@ following command from your host system:
 For more information, see :ref:`stop-sawtooth-docker-label`.
 
 
-Step 1: Download the Docker Compose file
+Step 1: Download the Docker Compose File
 ----------------------------------------
 
 Download the Docker Compose file for a multiple-node network,
@@ -167,7 +168,7 @@ Step 2: Start the Sawtooth Network
 Step 3: Verify Connectivity
 ---------------------------
 
-You can connect to Docker container, such as
+You can connect to a Docker container, such as
 ``sawtooth-poet-validator-registry-tp-0``, then use the following ``ps``
 command to verify that the component is running.
 
@@ -208,8 +209,8 @@ Step 4: Confirm Network Functionality
         }
 
 #. (Optional) You can also connect to a validator container, such as
-    ``sawtooth-validator-default-0``, and run the following Sawtooth commands to
-    show the other nodes on the network.
+   ``sawtooth-validator-default-0``, and run the following Sawtooth commands to
+   show the other nodes on the network.
 
    a. Run ``sawtooth peer list`` to show the peers of a particular node.
 
@@ -237,7 +238,96 @@ Step 4: Confirm Network Functionality
         MyKey: 999
 
 
-Step 5: Stop the Sawtooth Network (Optional)
+.. _configure-txn-procs-docker-label:
+
+Step 5. Configure the Allowed Transaction Types (Optional)
+----------------------------------------------------------
+
+By default, a validator accepts transactions from any transaction processor.
+However, Sawtooth allows you to limit the types of transactions that can be
+submitted.
+
+In this step, you will configure the validator network to accept transactions
+only from the four transaction processors in the example environment:
+IntegerKey, Settings, XO, and Validator Registry. Transaction-type restrictions
+are an on-chain setting, so this configuration change is applied to all
+validators.
+
+The :doc:`Settings transaction processor
+<../transaction_family_specifications/settings_transaction_family>`
+handles on-chain configuration settings. You will use the ``sawset`` command to
+create and submit a batch of transactions containing the configuration change.
+
+Use the following steps to create and submit a batch containing the new on-chain
+setting.
+
+1. Connect to the first validator container (``sawtooth-validator-default-0``).
+   The next command requires the validator key that was generated in that
+   container.
+
+   .. code-block:: console
+
+     % docker exec -it sawtooth-validator-default-0 bash
+
+#. Run the following command from the validator container to check the setting
+   change.
+
+   .. code-block:: console
+
+      # sawset proposal create --url http://sawtooth-rest-api-default-0:8008 --key /etc/sawtooth/keys/validator.priv \
+      sawtooth.validator.transaction_families='[{"family": "intkey", "version": "1.0"}, {"family":"sawtooth_settings", "version":"1.0"}, {"family":"xo", "version":"1.0"}, {"family":"sawtooth_validator_registry", "version":"1.0"}]'
+
+   This command sets ``sawtooth.validator.transaction_families`` to a JSON array
+   that specifies the family name and version of each allowed transaction
+   processor (defined in the transaction header of each family's
+   :doc:`transaction family specification <../transaction_family_specifications>`).
+
+#. After this command runs, a ``TP_PROCESS_REQUEST`` message appears in the
+   Settings transaction processor log.
+
+   You can view this log file by connecting to the ``sawtooth-settings-tp``
+   container on any node, then examining
+   ``/var/log/sawtooth/logs/settings-{xxxxxxx}-debug.log``. (Each Settings log
+   file has a unique string in the name.) This example connects to the Settings
+   transaction processor on the first node (``sawtooth-settings-tp-default-0``).
+
+
+   .. code-block:: console
+
+     % docker exec -it sawtooth-settings-tp-default-0 bash
+     # tail /var/log/sawtooth/settings-*-debug.log
+      .
+      .
+      .
+      [22:18:33.137 [MainThread] core DEBUG] received message of type: TP_PROCESS_REQUEST
+      [22:18:33.219 [MainThread] handler INFO] Setting setting sawtooth.validator.transaction_families changed from None to [{"family": "intkey", "version": "1.0"}, {"family":"sawtooth_settings", "version":"1.0"}, {"family":"xo", "version":"1.0"}, {"family":"sawtooth_validator_registry", "version":"1.0"}]
+
+#. Run the following command to check the setting change. You can use any
+   container for this step. Also, you can specify any REST API on the network;
+   this example uses the REST API on the first validator node.
+
+   .. code-block:: console
+
+      # sawtooth settings list --url http://sawtooth-rest-api-default-0:8008
+
+   The output should be similar to this example:
+
+   .. code-block:: console
+
+      sawtooth.consensus.algorithm: poet
+      sawtooth.poet.initial_wait_time: 15
+      sawtooth.poet.key_block_claim_limit: 100000
+      sawtooth.poet.report_public_key_pem: -----BEGIN PUBL...
+      sawtooth.poet.target_wait_time: 15
+      sawtooth.poet.valid_enclave_basenames: b785c58b77152cb...
+      sawtooth.poet.valid_enclave_measurements: c99f21955e38dbb...
+      sawtooth.poet.ztest_minimum_win_count: 100000
+      sawtooth.publisher.max_batches_per_block: 200
+      sawtooth.settings.vote.authorized_keys: 03e27504580fa15...
+      sawtooth.validator.transaction_families: [{"family": "in...
+
+
+Step 6: Stop the Sawtooth Network (Optional)
 --------------------------------------------
 
 If you need to stop or reset the multiple-node Sawtooth environment, enter
@@ -254,8 +344,8 @@ command from your host system:
 Ubuntu: Add a Node to the Single-Node Environment
 =================================================
 
-This procedure describes how to add a second validator node to a single-node
-application development environment, as described in :doc:`ubuntu`.
+This procedure describes how to add a second validator node to an existing
+single-node application development environment, as described in :doc:`ubuntu`.
 You will stop the Sawtooth components on the first node and delete the
 existing blockchain data, then create a new genesis block that specifies PoET
 simulator consensus and related settings. All nodes on the network will run four
@@ -270,7 +360,7 @@ The following figure shows an example network with two validator nodes:
 .. figure:: ../images/appdev-environment-two-nodes.*
    :width: 100%
    :align: center
-   :alt: Application development environment with two nodes
+   :alt: Ubuntu: Sawtooth network with two nodes
 
 Like the single-node environment, this environment uses serial transaction
 processing and static peering. However, it has the following differences:
@@ -281,7 +371,7 @@ processing and static peering. However, it has the following differences:
   Software Guard Extensions (SGX) to implement a leader-election lottery system.
   PoET simulator provides the same consensus algorithm on an SGX simulator.
 
-* An additional transaction processor, Validator Registry, which handles PoET
+* An additional transaction processor, PoET Validator Registry, handles PoET
   settings for a multiple-node network.
 
 .. _prereqs-multi-ubuntu-label:
@@ -405,7 +495,7 @@ in :doc:`ubuntu`.
    .. code-block:: console
 
       $ ls ~/.sawtooth/keys/
-      yourname.priv    yourname.pub
+      {yourname}.priv    {yourname}.pub
 
       $ ls /etc/sawtooth/keys/
       validator.priv   validator.pub
@@ -434,7 +524,7 @@ in :doc:`ubuntu`.
       sawtooth.poet.valid_enclave_measurements=$(poet enclave measurement) \
       sawtooth.poet.valid_enclave_basenames=$(poet enclave basename)
 
-#. Create a batch to register the first validator with the PoET Validator
+#. Create a batch to register the first validator with the Validator
    Registry. Without this command, the validator would not be able to publish
    any blocks.
 
@@ -537,7 +627,9 @@ in :doc:`ubuntu`.
 
    .. note::
 
-      This network requires ``settings-tp`` and ``poet-validator-registry-tp``.
+      This network requires the Settings transaction processor, ``settings-tp``,
+      and the PoET Validator Registry transaction processor,
+      ``poet-validator-registry-tp``.
       The other transaction processors (``intkey-tp-python`` and
       ``xo-tp-python``) are not required, but are used for the other tutorials
       in this guide. Note that each node in the network must run the same
@@ -558,8 +650,8 @@ Step 2: Set Up the Second Validator Node
    .. code-block:: console
 
       $ sawtooth keygen
-      writing file: /home/yourname/.sawtooth/keys/yourname.priv
-      writing file: /home/yourname/.sawtooth/keys/yourname.pub
+      writing file: /home/{yourname}/.sawtooth/keys/{yourname}.priv
+      writing file: /home/{yourname}/.sawtooth/keys/{yourname}.pub
 
 #. Create the root key for the validator:
 
@@ -731,6 +823,81 @@ Step 4: Confirm Network Functionality
          MyKey: 999
 
 
+.. _configure-txn-procs-ubuntu-label:
+
+Step 5. Configure the Allowed Transaction Types (Optional)
+----------------------------------------------------------
+
+By default, a validator accepts transactions from any transaction processor.
+However, Sawtooth allows you to limit the types of transactions that can be
+submitted.
+
+In this step, you will configure the validator network to accept transactions
+only from the four transaction processors in the example environment:
+IntegerKey, Settings, XO, and Validator Registry. Transaction-type restrictions
+are an on-chain setting, so this configuration change is applied to all
+validators.
+
+The :doc:`Settings transaction processor
+<../transaction_family_specifications/settings_transaction_family>`
+handles on-chain configuration settings. You can use the ``sawset`` command to
+create and submit a batch of transactions containing the configuration change.
+
+Use the following steps to create and submit a batch containing the new on-chain
+setting.
+
+1. Open a terminal window on the first validator node (node 0).  The next
+   command requires the validator key that was generated on that node.
+
+#. Use the ``sawset`` command to create and submit a batch of transactions
+   containing the configuration change.
+
+   .. code-block:: console
+
+      # sawset proposal create --key /etc/sawtooth/keys/validator.priv \
+      sawtooth.validator.transaction_families='[{"family": "intkey", "version": "1.0"}, {"family":"sawtooth_settings", "version":"1.0"}, {"family":"xo", "version":"1.0"}, {"family":"sawtooth_validator_registry", "version":"1.0"}]'
+
+   This command sets ``sawtooth.validator.transaction_families`` to a JSON array
+   that specifies the family name and version of each allowed transaction
+   processor (defined in the transaction header of each family's
+   :doc:`transaction family specification <../transaction_family_specifications>`).
+
+#. After this command runs, a ``TP_PROCESS_REQUEST`` message appears in the log
+   for the Settings transaction processor.
+
+   You can examine the log file,
+   ``/var/log/sawtooth/logs/settings-{xxxxxxx}-debug.log``, on any node. (Each
+   Settings log file has a unique string in the name.) The messages will
+   resemble this example:
+
+   .. code-block:: none
+
+      [20:07:58.039 [MainThread] core DEBUG] received message of type: TP_PROCESS_REQUEST
+      [20:07:58.190 [MainThread] handler INFO] Setting setting sawtooth.validator.transaction_families changed from None to [{"family": "intkey", "version": "1.0"}, {"family":"sawtooth_settings", "version":"1.0"}, {"family":"xo", "version":"1.0"}, {"family":"sawtooth_validator_registry", "version":"1.0"}]
+
+#. Run the following command to check the setting change.
+
+   .. code-block:: console
+
+      # sawtooth settings list
+
+   The output should be similar to this example:
+
+   .. code-block:: console
+
+      sawtooth.consensus.algorithm: poet
+      sawtooth.poet.initial_wait_time: 15
+      sawtooth.poet.key_block_claim_limit: 100000
+      sawtooth.poet.report_public_key_pem: -----BEGIN PUBL...
+      sawtooth.poet.target_wait_time: 15
+      sawtooth.poet.valid_enclave_basenames: b785c58b77152cb...
+      sawtooth.poet.valid_enclave_measurements: c99f21955e38dbb...
+      sawtooth.poet.ztest_minimum_win_count: 100000
+      sawtooth.publisher.max_batches_per_block: 200
+      sawtooth.settings.vote.authorized_keys: 03e27504580fa15...
+      sawtooth.validator.transaction_families: [{"family": "in...
+
+
 .. _proc-multi-kube-label:
 
 Kubernetes: Start a Multiple-node Sawtooth Network
@@ -776,10 +943,10 @@ This environment is a network of five Sawtooth node. Each node has a
 :doc:`serial transaction processing <../architecture/scheduling>`,
 and static peering (all-to-all)
 
-.. figure:: ../images/appdev-environment-multi-node-3TPs-kube.*
+.. figure:: ../images/appdev-environment-multi-node-kube.*
    :width: 100%
    :align: center
-   :alt: Kubernetes Sawtooth Network
+   :alt: Kubernetes: Sawtooth network with five nodes
 
 The Kubernetes cluster has a pod for each Sawtooth node. On each pod, there are
 containers for each Sawtooth component. The Sawtooth nodes are connected in
@@ -792,10 +959,10 @@ to view pod status, container names, Sawtooth log files, and more.
 This example environment includes the following transaction processors:
 
  * :doc:`Settings <../transaction_family_specifications/settings_transaction_family>`
-   handles Sawtooth's on-chain settings. The ``sawtooth-settings-tp``
-   transaction processor is required for this environment.
+   handles Sawtooth's on-chain settings. The Settings transaction processor,
+   ``settings-tp``, is required for this environment.
 
- * :doc:`Validator Registry <../transaction_family_specifications/validator_registry_transaction_family>`
+ * :doc:`PoET Validator Registry <../transaction_family_specifications/validator_registry_transaction_family>`
    configures PoET consensus and handles a network with multiple validators.
 
  * :doc:`IntegerKey <../transaction_family_specifications/integerkey_transaction_family>`
@@ -1064,7 +1231,7 @@ Step 5: Confirm Network and Blockchain Functionality
         $ kubectl exec -it $(kubectl get pods | awk '/sawtooth-N/{print $1}') --container sawtooth-shell -- bash
 
 #. (Optional) You can also connect to the shell container of any pod, and
-    run the following Sawtooth commands to show the other nodes on the network.
+   run the following Sawtooth commands to show the other nodes on the network.
 
    a. Run ``sawtooth peer list`` to show the peers of a particular node.
 
@@ -1094,12 +1261,12 @@ Step 5: Confirm Network and Blockchain Functionality
            root@sawtooth-1# intkey show MyKey
            MyKey: 999
 
-#. You can can check whether a Sawtooth component is running by connecting to a
+#. You can check whether a Sawtooth component is running by connecting to a
    different container, then running the ``ps`` command. The container names are
    available in the kubeconfig file or on a pod's page on the Kubernetes
    dashboard.
 
-   The following example connects to pod 3's Validator Registry container
+   The following example connects to pod 3's PoET Validator Registry container
    (``sawtooth-poet-validator-registry-tp``), then displays the list of running
    process.
 
@@ -1116,23 +1283,110 @@ At this point, your environment is ready for experimenting with Sawtooth.
 For more ways to test basic functionality, see the Kubernetes section of
 "Setting Up a Sawtooth Application Development Environment".
 
-.. REVIEWERS: THE FOLLOWING LINKS WON'T WORK UNTIL PR 1822 HAS BEEN MERGED.
-.. I WILL ACTIVATE THESE LINKS (AND REMOVE THE COMMENTS) WHEN THE SINGLE-NODE
-.. KUBERNETES PROCEDURE IS AVAILABLE.
-
 * To use Sawtooth client commands to view block information and check state
-  data, see xxx.
+  data, see :ref:`sawtooth-client-kube-label`.
 
-.. :ref:`sawtooth-client-kube-label`.
+* For information on the Sawtooth logs, see :ref:`examine-logs-kube-label`.
 
-* For information on the Sawtooth logs, see xxx.
 
-.. :ref:`examine-logs-kube-label`.
+.. _configure-txn-procs-kube-label:
+
+Step 6. Configure the Allowed Transaction Types (Optional)
+----------------------------------------------------------
+
+By default, a validator accepts transactions from any transaction processor.
+However, Sawtooth allows you to limit the types of transactions that can be
+submitted.
+
+In this step, you will configure the validator network to accept transactions
+only from the four transaction processors in the example environment:
+IntegerKey, Settings, XO, and Validator Registry. Transaction-type restrictions
+are an on-chain setting, so this configuration change is applied to all
+validators.
+
+The :doc:`Settings transaction processor
+<../transaction_family_specifications/settings_transaction_family>`
+handles on-chain configuration settings. You can use the ``sawset`` command to
+create and submit a batch of transactions containing the configuration change.
+
+Use the following steps to create and submit a batch containing the new setting.
+
+1. Connect to the validator container of the first node
+   (``sawtooth-0-{xxxxxxxx}``). The next command requires the validator key that
+   was generated in that container.
+
+   .. code-block:: console
+
+      $ kubectl exec -it $(kubectl get pods | awk '/sawtooth-0/{print $1}') --container sawtooth-validator -- bash
+      root@sawtooth-0#
+
+#. Run the following command from the validator container:
+
+   .. code-block:: console
+
+      root@sawtooth-0# sawset proposal create --key /etc/sawtooth/keys/validator.priv sawtooth.validator.transaction_families='[{"family": "intkey", "version": "1.0"}, {"family":"sawtooth_settings", "version":"1.0"}, {"family":"xo", "version":"1.0"}, {"family":"sawtooth_validator_registry", "version":"1.0"}]'
+
+   This command sets ``sawtooth.validator.transaction_families`` to a JSON array
+   that specifies the family name and version of each allowed transaction
+   processor (defined in the transaction header of each family's
+   :doc:`transaction family specification <../transaction_family_specifications>`).
+
+#. After this command runs, a ``TP_PROCESS_REQUEST`` message appears in the log
+   for the Settings transaction processor.
+
+   * You can use the Kubernetes dashboard to view this log message:
+
+     a. From the Overview page, scroll to the list of pods and click on any pod
+        name.
+
+     #. On the pod page, click :guilabel:`LOGS` (in the top right).
+
+     #. On the pod's log page, select logs from ``sawtooth-settings-tp``, then
+        scroll to the bottom of the log. The message will resemble this example:
+
+        .. code-block:: none
+
+           [2018-09-05 20:07:41.903 DEBUG    core] received message of type: TP_PROCESS_REQUEST
+   * You can also connect to the ``sawtooth-settings-tp`` container on any pod,
+     then examine ``/var/log/sawtooth/logs/settings-{xxxxxxx}-debug.log``. (Each
+     Settings log file has a unique string in the name.) The messages will
+     resemble this example:
+
+     .. code-block:: none
+
+         .
+         .
+         .
+        [20:07:58.039 [MainThread] core DEBUG] received message of type: TP_PROCESS_REQUEST
+        [20:07:58.190 [MainThread] handler INFO] Setting setting sawtooth.validator.transaction_families changed from None to [{"family": "intkey", "version": "1.0"}, {"family":"sawtooth_settings", "version":"1.0"}, {"family":"xo", "version":"1.0"}, {"family":"sawtooth_validator_registry", "version":"1.0"}]
+
+#. Run the following command to check the setting change. You can use any
+   container, such as a shell or another validator container.
+
+   .. code-block:: console
+
+      root@sawtooth-1# sawtooth settings list
+
+   The output should be similar to this example:
+
+   .. code-block:: console
+
+      sawtooth.consensus.algorithm: poet
+      sawtooth.poet.initial_wait_time: 15
+      sawtooth.poet.key_block_claim_limit: 100000
+      sawtooth.poet.report_public_key_pem: -----BEGIN PUBL...
+      sawtooth.poet.target_wait_time: 15
+      sawtooth.poet.valid_enclave_basenames: b785c58b77152cb...
+      sawtooth.poet.valid_enclave_measurements: c99f21955e38dbb...
+      sawtooth.poet.ztest_minimum_win_count: 100000
+      sawtooth.publisher.max_batches_per_block: 200
+      sawtooth.settings.vote.authorized_keys: 03e27504580fa15...
+      sawtooth.validator.transaction_families: [{"family": "in...
 
 
 .. _stop-sawtooth-kube2-label:
 
-Step 7: Stop the Sawtooth Kubernetes Cluster
+Step 6: Stop the Sawtooth Kubernetes Cluster
 --------------------------------------------
 
 Use the following commands to stop and reset the Sawtooth network.

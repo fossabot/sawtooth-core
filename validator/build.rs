@@ -50,16 +50,16 @@ fn main() {
     let proto_src_files = glob_simple(&format!("{}/*.proto", PROTO_FILES_DIR));
     let last_build_time = read_last_build_time();
 
-    let latest_change = proto_src_files.iter().fold(
-        Duration::from_secs(0),
-        |max, ref proto_file| {
-            if proto_file.last_modified > max {
-                proto_file.last_modified
-            } else {
-                max
-            }
-        },
-    );
+    let latest_change =
+        proto_src_files
+            .iter()
+            .fold(Duration::from_secs(0), |max, ref proto_file| {
+                if proto_file.last_modified > max {
+                    proto_file.last_modified
+                } else {
+                    max
+                }
+            });
 
     let out_dir = env::var("OUT_DIR").expect("No OUT_DIR env variable");
     let dest_path = Path::new(&out_dir).join(PROTO_DIR_NAME);
@@ -74,9 +74,7 @@ fn main() {
                 .map(|proto_file| proto_file.file_path.as_ref())
                 .collect::<Vec<&str>>(),
             includes: &["src", PROTO_FILES_DIR],
-            customize: Customize {
-                ..Default::default()
-            },
+            customize: Customize::default(),
         }).expect("unable to run protoc");
 
         let mod_file_name = format!("{}/mod.rs", &dest_path.to_str().unwrap());
@@ -167,6 +165,5 @@ fn get_modified_time(file: fs::File) -> Duration {
             sys_time
                 .duration_since(UNIX_EPOCH)
                 .expect("System time should be after UNIX_EPOCH")
-        })
-        .expect("File should have modified time")
+        }).expect("File should have modified time")
 }

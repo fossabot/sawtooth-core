@@ -16,13 +16,18 @@
  */
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
-
+#[cfg(feature = "pem")]
+use openssl::{
+    bn::{BigNum, BigNumContext},
+    ec::{EcGroup, EcKey, EcPoint},
+    error::ErrorStack,
+    nid::Nid,
+    pkey::Private as EcPrivate,
+    symm::Cipher,
+};
 use rand::os::OsRng;
 use rand::Rng;
 use secp256k1;
-
-#[cfg(feature = "pem")]
-use signing::pem_loader::load_pem_key;
 use signing::Context;
 use signing::Error;
 use signing::PrivateKey;
@@ -30,6 +35,13 @@ use signing::PublicKey;
 
 impl From<secp256k1::Error> for Error {
     fn from(e: secp256k1::Error) -> Self {
+        Error::SigningError(Box::new(e))
+    }
+}
+
+#[cfg(feature = "pem")]
+impl From<ErrorStack> for Error {
+    fn from(e: ErrorStack) -> Self {
         Error::SigningError(Box::new(e))
     }
 }
@@ -45,14 +57,45 @@ impl Secp256k1PrivateKey {
 
     #[cfg(feature = "pem")]
     pub fn from_pem(s: &str) -> Result<Self, Error> {
-        let (priv_key_str, _) = load_pem_key(s, "")?;
-        Self::from_hex(&priv_key_str)
+        let ec_key = EcKey::private_key_from_pem(s.as_bytes())?;
+
+        Self::from_hex(&ec_key.private_key().to_hex_str()?.to_string())
     }
 
     #[cfg(feature = "pem")]
     pub fn from_pem_with_password(s: &str, pw: &str) -> Result<Self, Error> {
-        let (priv_key_str, _) = load_pem_key(s, pw)?;
-        Self::from_hex(&priv_key_str)
+        let ec_key = EcKey::private_key_from_pem_passphrase(s.as_bytes(), pw.as_bytes())?;
+
+        Self::from_hex(&ec_key.private_key().to_hex_str()?.to_string())
+    }
+
+    #[cfg(feature = "pem")]
+    fn to_ec_key(&self) -> Result<EcKey<EcPrivate>, Error> {
+        let mut bignum_ctx = BigNumContext::new()?;
+        let context = Secp256k1Context::new();
+        let group = EcGroup::from_curve_name(Nid::SECP256K1)?;
+        let key_bytes = BigNum::from_slice(&self.private[..])?;
+        let pubkey = context.get_public_key(self)?;
+        let pubkey = EcPoint::from_bytes(&group, pubkey.as_slice(), &mut bignum_ctx)?;
+
+        Ok(EcKey::from_private_components(&group, &key_bytes, &pubkey)?)
+    }
+
+    #[cfg(feature = "pem")]
+    pub fn to_pem(&self) -> Result<String, Error> {
+        let key = self.to_ec_key()?;
+        let pem_bytes = key.private_key_to_pem()?;
+
+        Ok(String::from_utf8_lossy(&pem_bytes).to_string())
+    }
+
+    #[cfg(feature = "pem")]
+    pub fn to_pem_with_password(&self, password: &str) -> Result<String, Error> {
+        let key = self.to_ec_key()?;
+        let pem_bytes =
+            key.private_key_to_pem_passphrase(Cipher::aes_128_cbc(), password.as_bytes())?;
+
+        Ok(String::from_utf8_lossy(&pem_bytes).to_string())
     }
 }
 
@@ -193,8 +236,7 @@ fn hex_str_to_bytes(s: &str) -> Result<Vec<u8>, Error> {
         .chunks(2)
         .map(|chunk| {
             ((chunk[0].to_digit(16).unwrap() << 4) | (chunk[1].to_digit(16).unwrap())) as u8
-        })
-        .collect();
+        }).collect();
 
     Ok(decoded)
 }
@@ -224,6 +266,8 @@ mod secp256k1_test {
         "51b845c2cdde22fe646148f0b51eaf5feec8c82ee921d5e0cbe7619f3bb9c62d";
     static KEY2_PUB_HEX: &'static str =
         "039c20a66b4ec7995391dbec1d8bb0e2c6e6fd63cd259ed5b877cb4ea98858cf6d";
+    #[cfg(feature = "pem")]
+    static KEY2_PASS: &'static str = "hunter2";
 
     static MSG1: &'static str = "test";
     static MSG1_KEY1_SIG: &'static str = "5195115d9be2547b720ee74c23dd841842875db6eae1f5da8605b050a49e702b4aa83be72ab7e3cb20f17c657011b49f4c8632be2745ba4de79e6aa05da57b35";
@@ -260,6 +304,33 @@ mod secp256k1_test {
 
         let public_key2 = context.get_public_key(&priv_key2).unwrap();
         assert_eq!(public_key2.as_hex(), KEY2_PUB_HEX);
+    }
+
+    #[test]
+    #[cfg(feature = "pem")]
+    fn pem_roundtrip() {
+        let context = create_context("secp256k1").unwrap();
+        assert_eq!(context.get_algorithm_name(), "secp256k1");
+
+        // Without password
+        let priv_key1 = Secp256k1PrivateKey::from_hex(KEY1_PRIV_HEX).unwrap();
+        let pem_contents = priv_key1.to_pem().unwrap();
+
+        let parsed_priv_key = Secp256k1PrivateKey::from_pem(&pem_contents).unwrap();
+        let parsed_pub_key = context.get_public_key(&parsed_priv_key).unwrap();
+        assert_eq!(KEY1_PRIV_HEX, parsed_priv_key.as_hex());
+        assert_eq!(KEY1_PUB_HEX, parsed_pub_key.as_hex());
+
+        // With password. Can't test exact pem contents due to salt changing for every run,
+        // but can still test roundtrip
+        let priv_key2 = Secp256k1PrivateKey::from_hex(KEY2_PRIV_HEX).unwrap();
+        let pem_contents = priv_key2.to_pem_with_password(KEY2_PASS).unwrap();
+
+        let parsed_priv_key =
+            Secp256k1PrivateKey::from_pem_with_password(&pem_contents, KEY2_PASS).unwrap();
+        let parsed_pub_key = context.get_public_key(&parsed_priv_key).unwrap();
+        assert_eq!(KEY2_PRIV_HEX, parsed_priv_key.as_hex());
+        assert_eq!(KEY2_PUB_HEX, parsed_pub_key.as_hex());
     }
 
     #[test]

@@ -15,7 +15,6 @@
  * ------------------------------------------------------------------------------
  */
 
-extern crate cc;
 extern crate glob;
 extern crate protoc_rust;
 
@@ -28,16 +27,6 @@ use std::path::Path;
 use protoc_rust::Customize;
 
 fn main() {
-    // Compile C PEM loader file
-    if cfg!(feature = "pem") {
-        println!("cargo:rustc-link-lib={}={}", "dylib", "crypto");
-        cc::Build::new()
-            .file("../c/loader.c")
-            .file("../c/c11_support.c")
-            .include("../c")
-            .compile("libloader.a");
-    }
-
     // Generate protobuf files
     let proto_src_files = glob_simple("../../protos/*.proto");
     println!("{:?}", proto_src_files);
@@ -58,8 +47,7 @@ fn main() {
                     .to_str()
                     .expect("Unable to extract filename")
             )
-        })
-        .collect::<Vec<_>>()
+        }).collect::<Vec<_>>()
         .join("\n");
 
     let mut mod_file = File::create(dest_path.join("mod.rs")).unwrap();
@@ -74,9 +62,7 @@ fn main() {
             .map(|a| a.as_ref())
             .collect::<Vec<&str>>(),
         includes: &["src", "../../protos"],
-        customize: Customize {
-            ..Default::default()
-        },
+        customize: Customize::default(),
     }).expect("unable to run protoc");
 }
 
@@ -89,6 +75,5 @@ fn glob_simple(pattern: &str) -> Vec<String> {
                 .to_str()
                 .expect("utf-8")
                 .to_owned()
-        })
-        .collect()
+        }).collect()
 }

@@ -36,7 +36,7 @@ processing.
 .. figure:: ../images/appdev-environment-one-node-3TPs.*
    :width: 100%
    :align: center
-   :alt: Ubuntu application development environment for Ubuntu
+   :alt: Ubuntu: Sawtooth application environment with one node
 
 This environment introduces basic Sawtooth functionality with the
 `IntegerKey <../transaction_family_specifications/integerkey_transaction_family>`_
@@ -89,7 +89,7 @@ stable or nightly.  We recommend using the stable repository.
      .. code-block:: console
 
        user@validator$ sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 8AA7AF1F1091A5FD
-       user@validator$ sudo add-apt-repository 'deb [arch=amd64] http://repo.sawtooth.me/ubuntu/1.0/stable xenial universe'
+       user@validator$ sudo add-apt-repository 'deb [arch=amd64] http://repo.sawtooth.me/ubuntu/bumper/stable xenial universe'
        user@validator$ sudo apt-get update
 
    * To use the nightly repository, run the following commands:

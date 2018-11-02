@@ -13,10 +13,14 @@
 # limitations under the License.
 # ------------------------------------------------------------------------------
 
+import hashlib
 
 from collections import namedtuple
 
 from sawtooth_validator.protobuf.block_pb2 import BlockHeader
+from sawtooth_validator.protobuf.consensus_pb2 import ConsensusPeerMessage
+from sawtooth_validator.protobuf.consensus_pb2 import \
+    ConsensusPeerMessageHeader
 
 
 class UnknownBlock(Exception):
@@ -34,7 +38,8 @@ class ConsensusProxy:
 
     def __init__(self, block_manager, block_publisher,
                  chain_controller, gossip, identity_signer,
-                 settings_view_factory, state_view_factory):
+                 settings_view_factory, state_view_factory,
+                 consensus_registry):
         self._block_manager = block_manager
         self._chain_controller = chain_controller
         self._block_publisher = block_publisher
@@ -43,11 +48,15 @@ class ConsensusProxy:
         self._public_key = self._identity_signer.get_public_key().as_bytes()
         self._settings_view_factory = settings_view_factory
         self._state_view_factory = state_view_factory
+        self._consensus_registry = consensus_registry
 
-    def register(self):
+    def register(self, engine_name, engine_version, connection_id):
         chain_head = self._chain_controller.chain_head
         if chain_head is None:
             return None
+
+        self._consensus_registry.register_engine(
+            connection_id, engine_name, engine_version)
 
         return StartupInfo(
             chain_head=chain_head,
@@ -58,16 +67,17 @@ class ConsensusProxy:
             local_peer_info=self._public_key)
 
     # Using network service
-    def send_to(self, peer_id, message):
+    def send_to(self, peer_id, message_type, content, connection_id):
+        message = self._wrap_consensus_message(
+            content, message_type, connection_id)
         self._gossip.send_consensus_message(
             peer_id=peer_id.hex(),
-            message=message,
-            public_key=self._public_key)
+            message=message)
 
-    def broadcast(self, message):
-        self._gossip.broadcast_consensus_message(
-            message=message,
-            public_key=self._public_key)
+    def broadcast(self, message_type, content, connection_id):
+        message = self._wrap_consensus_message(
+            content, message_type, connection_id)
+        self._gossip.broadcast_consensus_message(message=message)
 
     # Using block publisher
     def initialize_block(self, previous_id):
@@ -130,6 +140,13 @@ class ConsensusProxy:
         except StopIteration:
             raise UnknownBlock()
         self._chain_controller.fail_block(block)
+
+    def forks(self):
+        chain_head = self._chain_controller.chain_head
+        if chain_head is None:
+            return None
+
+        return self._chain_controller.forks(chain_head.header_signature)
 
     # Using blockstore and state database
     def blocks_get(self, block_ids):
@@ -207,3 +224,21 @@ class ConsensusProxy:
             raise UnknownBlock()
 
         return blocks
+
+    def _wrap_consensus_message(self, content, message_type, connection_id):
+        _, name, version = self._consensus_registry.get_engine_info()
+        header = ConsensusPeerMessageHeader(
+            signer_id=self._public_key,
+            content_sha512=hashlib.sha512(content).digest(),
+            message_type=message_type,
+            name=name,
+            version=version,
+        ).SerializeToString()
+
+        signature = bytes.fromhex(self._identity_signer.sign(header))
+        message = ConsensusPeerMessage(
+            header=header,
+            content=content,
+            header_signature=signature)
+
+        return message

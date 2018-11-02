@@ -15,8 +15,6 @@
  * ------------------------------------------------------------------------------
  */
 
-#![allow(unknown_lints)]
-
 use protobuf;
 use protobuf::{Message as ProtobufMessage, ProtobufError};
 use rand;
@@ -85,23 +83,20 @@ impl ZmqDriver {
         let driver_thread = thread::spawn(move || {
             driver_loop(
                 update_sender,
-                self.stop_receiver,
+                &self.stop_receiver,
                 validator_sender,
-                validator_receiver,
+                &validator_receiver,
             )
         });
 
-        let (name, version) = { (engine.name(), engine.version()) };
         engine.start(
             update_receiver,
             Box::new(ZmqService::new(
                 validator_sender_clone,
                 Duration::from_secs(SERVICE_TIMEOUT),
-                name,
-                version,
             )),
             startup_state,
-        );
+        )?;
 
         driver_thread.join().expect("Driver panicked")
     }
@@ -121,12 +116,11 @@ impl Stop {
     }
 }
 
-#[allow(needless_pass_by_value)]
 fn driver_loop(
     mut update_sender: Sender<Update>,
-    stop_receiver: Receiver<()>,
+    stop_receiver: &Receiver<()>,
     mut validator_sender: ZmqMessageSender,
-    validator_receiver: Receiver<Result<Message, ReceiveError>>,
+    validator_receiver: &Receiver<Result<Message, ReceiveError>>,
 ) -> Result<(), Error> {
     loop {
         match validator_receiver.recv_timeout(Duration::from_millis(100)) {
@@ -174,8 +168,7 @@ pub fn register(
             Message_MessageType::CONSENSUS_REGISTER_REQUEST,
             &generate_correlation_id(),
             &request,
-        )?
-        .get_timeout(timeout)?;
+        )?.get_timeout(timeout)?;
 
     let ret: Result<StartupState, Error>;
 
@@ -216,8 +209,7 @@ pub fn register(
                                 Message_MessageType::CONSENSUS_REGISTER_REQUEST,
                                 &generate_correlation_id(),
                                 &request,
-                            )?
-                            .get_timeout(timeout)?;
+                            )?.get_timeout(timeout)?;
 
                         continue;
                     }
@@ -266,8 +258,11 @@ fn handle_update(
         CONSENSUS_NOTIFY_PEER_MESSAGE => {
             let mut request: ConsensusNotifyPeerMessage =
                 protobuf::parse_from_bytes(msg.get_content())?;
+            let mut header: ConsensusPeerMessageHeader =
+                protobuf::parse_from_bytes(request.get_message().get_header())?;
+            let mut message = request.take_message();
             Update::PeerMessage(
-                request.take_message().into(),
+                from_consensus_peer_message(message, header),
                 request.take_sender_id().into(),
             )
         }
@@ -329,12 +324,21 @@ impl From<ConsensusPeerInfo> for PeerInfo {
     }
 }
 
-impl From<ConsensusPeerMessage> for PeerMessage {
-    fn from(mut c_msg: ConsensusPeerMessage) -> PeerMessage {
-        PeerMessage {
-            message_type: c_msg.take_message_type(),
-            content: c_msg.take_content(),
-        }
+fn from_consensus_peer_message(
+    mut c_msg: ConsensusPeerMessage,
+    mut c_msg_header: ConsensusPeerMessageHeader,
+) -> PeerMessage {
+    PeerMessage {
+        header: PeerMessageHeader {
+            signer_id: c_msg_header.take_signer_id(),
+            content_sha512: c_msg_header.take_content_sha512(),
+            message_type: c_msg_header.take_message_type(),
+            name: c_msg_header.take_name(),
+            version: c_msg_header.take_version(),
+        },
+        header_bytes: c_msg.take_header(),
+        header_signature: c_msg.take_header_signature(),
+        content: c_msg.take_content(),
     }
 }
 

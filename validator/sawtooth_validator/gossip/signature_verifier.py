@@ -23,6 +23,8 @@ from sawtooth_validator.protobuf import client_batch_submit_pb2
 from sawtooth_validator.protobuf.transaction_pb2 import TransactionHeader
 from sawtooth_validator.protobuf.batch_pb2 import BatchHeader
 from sawtooth_validator.protobuf.block_pb2 import BlockHeader
+from sawtooth_validator.protobuf.consensus_pb2 import \
+    ConsensusPeerMessageHeader
 from sawtooth_validator.protobuf.network_pb2 import GossipMessage
 from sawtooth_validator import metrics
 from sawtooth_validator.networking.dispatch import HandlerResult
@@ -113,6 +115,30 @@ def is_valid_transaction(txn):
     return True
 
 
+def is_valid_consensus_message(message):
+    # validate consensus message signature
+    header = ConsensusPeerMessageHeader()
+    header.ParseFromString(message.header)
+
+    context = create_context('secp256k1')
+    public_key = Secp256k1PublicKey.from_bytes(header.signer_id)
+    if not context.verify(message.header_signature,
+                          message.header,
+                          public_key):
+        LOGGER.debug("message signature invalid for message: %s",
+                     message.header_signature)
+        return False
+
+    # verify the message field matches the header
+    content_sha512 = hashlib.sha512(message.content).digest()
+    if content_sha512 != header.content_sha512:
+        LOGGER.debug("message doesn't match content_sha512 of the header for"
+                     "message envelope: %s", message.header_signature)
+        return False
+
+    return True
+
+
 class GossipMessageSignatureVerifier(Handler):
     def __init__(self):
         self._seen_cache = TimedCache()
@@ -148,6 +174,12 @@ class GossipMessageSignatureVerifier(Handler):
                 return HandlerResult(status=HandlerStatus.DROP)
 
             self._seen_cache[obj.header_signature] = None
+            return HandlerResult(status=HandlerStatus.PASS)
+
+        if tag == GossipMessage.CONSENSUS:
+            if not is_valid_consensus_message(obj):
+                return HandlerResult(status=HandlerStatus.DROP)
+
             return HandlerResult(status=HandlerStatus.PASS)
 
         # should drop the message if it does not have a valid content_type

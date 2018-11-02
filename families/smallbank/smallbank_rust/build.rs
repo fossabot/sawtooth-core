@@ -41,9 +41,7 @@ fn main() {
             .map(|proto_file| proto_file.as_ref())
             .collect::<Vec<&str>>(),
         includes: &["../protos"],
-        customize: Customize {
-            ..Default::default()
-        },
+        customize: Customize::default(),
     }).expect("Error generating rust files from smallbank protos");
 
     // Create mod.rs accordingly
@@ -59,8 +57,7 @@ fn main() {
                     .to_str()
                     .expect("Unable to extract filename")
             )
-        })
-        .collect::<Vec<_>>()
+        }).collect::<Vec<_>>()
         .join("\n");
 
     let mut mod_file = File::create(dest_path.join("mod.rs")).unwrap();
@@ -78,6 +75,5 @@ fn glob_simple(pattern: &str) -> Vec<String> {
                 .to_str()
                 .expect("utf-8")
                 .to_owned()
-        })
-        .collect()
+        }).collect()
 }

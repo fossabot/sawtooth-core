@@ -24,8 +24,7 @@ use cpython::ObjectProtocol;
 use cpython::PyClone;
 use cpython::Python;
 
-use crypto::digest::Digest;
-use crypto::sha2::Sha256;
+use hashlib::sha256_digest_strs;
 
 use batch::Batch;
 use block::Block;
@@ -194,15 +193,16 @@ impl CandidateBlock {
 
     fn batch_is_already_committed(&self, batch: &Batch) -> bool {
         self.pending_batch_ids
-            .contains(batch.header_signature.as_str()) || {
-            let gil = cpython::Python::acquire_gil();
-            let py = gil.python();
-            self.batch_committed
-                .call(py, (batch.header_signature.as_str(),), None)
-                .expect("Call to determine if batch is committed failed")
-                .extract::<bool>(py)
-                .unwrap()
-        }
+            .contains(batch.header_signature.as_str())
+            || {
+                let gil = cpython::Python::acquire_gil();
+                let py = gil.python();
+                self.batch_committed
+                    .call(py, (batch.header_signature.as_str(),), None)
+                    .expect("Call to determine if batch is committed failed")
+                    .extract::<bool>(py)
+                    .unwrap()
+            }
     }
 
     fn poll_injectors<F: Fn(&cpython::PyObject) -> Vec<cpython::PyObject>>(
@@ -369,8 +369,7 @@ impl CandidateBlock {
             .filter(|(_, txns)| match txns {
                 Some(t) => !t.iter().any(|t| !t.is_valid),
                 None => false,
-            })
-            .map(|(b_id, _)| b_id)
+            }).map(|(b_id, _)| b_id)
             .collect();
 
         let builder = {
@@ -448,22 +447,20 @@ impl CandidateBlock {
                 "set_state_hash",
                 (execution_results.ending_state_hash,),
                 None,
-            )
-            .expect("BlockBuilder has no method 'set_state_hash'");
+            ).expect("BlockBuilder has no method 'set_state_hash'");
 
-        let mut hasher = Sha256::new();
-
-        for batch in builder
+        let batches = builder
             .getattr(py, "batches")
             .expect("BlockBuilder has no attribute 'batches'")
             .extract::<Vec<Batch>>(py)
-            .expect("Unable to extract PyList of Batches as Vec<Batch>")
-        {
-            hasher.input_str(&batch.header_signature);
-        }
-        let mut bytes = vec![0; hasher.output_bytes()];
-        hasher.result(&mut bytes);
-        self.summary = Some(bytes);
+            .expect("Unable to extract PyList of Batches as Vec<Batch>");
+
+        let batch_ids: Vec<&str> = batches
+            .iter()
+            .map(|batch| batch.header_signature.as_str())
+            .collect();
+
+        self.summary = Some(sha256_digest_strs(batch_ids.as_slice()));
         self.remaining_batches = pending_batches;
 
         Ok(self.summary.clone())
@@ -509,7 +506,8 @@ impl CandidateBlock {
             .expect("BlockBuilder has no attribute 'batches'")
             .extract::<cpython::PyList>(py)
             .unwrap()
-            .len(py) == 0
+            .len(py)
+            == 0
     }
 
     fn build_result(

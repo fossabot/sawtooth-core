@@ -37,11 +37,11 @@ use protobuf;
 
 use batch::Batch;
 use block::Block;
+use consensus::notifier::ConsensusNotifier;
 use execution::execution_platform::ExecutionPlatform;
 use gossip::permission_verifier::PermissionVerifier;
 use journal;
 use journal::block_manager::{BlockManager, BlockManagerError};
-use journal::block_store::{BatchIndex, BlockStore, TransactionIndex};
 use journal::block_validator::{
     BlockValidationResult, BlockValidationResultStore, BlockValidator, ValidationError,
 };
@@ -127,13 +127,6 @@ pub trait ChainReader: Send + Sync {
     fn get_block_by_block_id(&self, block_id: &str) -> Result<Option<Block>, ChainReadError>;
 }
 
-pub trait ConsensusNotifier: Send + Sync {
-    fn notify_block_new(&self, block: &Block);
-    fn notify_block_valid(&self, block_id: &str);
-    fn notify_block_invalid(&self, block_id: &str);
-    fn notify_block_commit(&self, block_id: &str);
-}
-
 /// Holds the results of Block Validation.
 struct ForkResolutionResult<'a> {
     pub block: &'a Block,
@@ -205,7 +198,7 @@ impl ChainControllerState {
         };
 
         info!(
-            "Building fork resoultion for chain head '{}' against new block '{}'",
+            "Building fork resolution for chain head '{}' against new block '{}'",
             &chain_head, &new_block
         );
         if let Some(prior_heads_successor) = result.new_chain.get(0) {
@@ -246,18 +239,12 @@ impl ChainControllerState {
 }
 
 #[derive(Clone)]
-pub struct ChainController<
-    TEP: ExecutionPlatform + Clone,
-    PV: PermissionVerifier + Clone,
-    BS: BlockStore + Clone,
-    B: BatchIndex + Clone,
-    T: TransactionIndex + Clone,
-> {
+pub struct ChainController<TEP: ExecutionPlatform + Clone, PV: PermissionVerifier + Clone> {
     state: Arc<RwLock<ChainControllerState>>,
     stop_handle: Arc<Mutex<Option<ChainThreadStopHandle>>>,
 
     consensus_notifier: Arc<ConsensusNotifier>,
-    block_validator: BlockValidator<TEP, PV, BS, B, T>,
+    block_validator: BlockValidator<TEP, PV>,
     block_validation_results: BlockValidationResultStore,
 
     // Queues
@@ -269,18 +256,13 @@ pub struct ChainController<
     chain_head_lock: ChainHeadLock,
 }
 
-impl<
-        TEP: ExecutionPlatform + Clone + 'static,
-        PV: PermissionVerifier + Clone + 'static,
-        BS: BlockStore + Clone + 'static,
-        B: BatchIndex + Clone + 'static,
-        T: TransactionIndex + Clone + 'static,
-    > ChainController<TEP, PV, BS, B, T>
+impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 'static>
+    ChainController<TEP, PV>
 {
     #![allow(too_many_arguments)]
     pub fn new(
         block_manager: BlockManager,
-        block_validator: BlockValidator<TEP, PV, BS, B, T>,
+        block_validator: BlockValidator<TEP, PV>,
         chain_reader: Box<ChainReader>,
         chain_head_lock: ChainHeadLock,
         block_validation_results: BlockValidationResultStore,
@@ -531,19 +513,62 @@ impl<
         }
     }
 
-    fn set_block_validation_result(&self, result: BlockValidationResult) {
-        self.block_validation_results.insert(result)
-    }
-
-    fn get_block_unchecked(&self, block_id: &str) -> Block {
+    // Returns all blocks in forks not on the chain with the given head. If head is None, uses the
+    // current chain head. If head is not found, returns None.
+    pub fn forks(&self, head: &str) -> Option<Vec<Block>> {
         let state = self
             .state
             .read()
             .expect("No lock holder should have poisoned the lock");
 
-        let block = state.block_manager.get(&[block_id]).next();
-        let errstr = "The caller must guarantee that the block is known to the block manager";
-        block.expect(errstr).expect(errstr)
+        match state.block_manager.ref_block(head) {
+            Err(BlockManagerError::UnknownBlock) => {
+                return None;
+            }
+            Err(err) => {
+                error!("Unexpected error occurred: {:?}", err);
+                return None;
+            }
+            Ok(_) => (),
+        }
+
+        let mut forks: Vec<Block> = state
+            .fork_cache
+            .forks()
+            .into_iter()
+            .flat_map(|fork_head: &String| {
+                state
+                    .block_manager
+                    .branch_diff(fork_head, head)
+                    .expect("Fork not found, but should be referenced")
+            }).collect();
+
+        forks.sort_by(|left, right| {
+            left.block_num
+                .cmp(&right.block_num)
+                .then(left.header_signature.cmp(&right.header_signature))
+        });
+        forks.dedup_by(|left, right| left.header_signature == right.header_signature);
+
+        state
+            .block_manager
+            .unref_block(head)
+            .expect("Block should not have been dropped");
+
+        Some(forks)
+    }
+
+    fn set_block_validation_result(&self, result: BlockValidationResult) {
+        self.block_validation_results.insert(result)
+    }
+
+    fn get_block(&self, block_id: &str) -> Option<Block> {
+        let state = self
+            .state
+            .read()
+            .expect("No lock holder should have poisoned the lock");
+
+        state.block_manager.get(&[block_id]).next().unwrap_or(None)
     }
 
     pub fn commit_block(&self, block: Block) {
@@ -612,8 +637,7 @@ impl<
                     .map_err(|err| {
                         error!("Error reading chain head: {:?}", err);
                         err
-                    })?
-                    .expect(
+                    })?.expect(
                         "Attempting to handle block commit before a genesis block has been
                         committed",
                     );
@@ -672,8 +696,7 @@ impl<
                     .persist(
                         &state.chain_head.as_ref().unwrap().header_signature,
                         COMMIT_STORE,
-                    )
-                    .map_err(|err| {
+                    ).map_err(|err| {
                         error!("Error persisting new chain head: {:?}", err);
                         err
                     })?;
@@ -896,8 +919,7 @@ impl<
                     if let Err(err) = chain_thread.run() {
                         error!("Error occurred during ChainController loop: {:?}", err);
                     }
-                })
-                .unwrap();
+                }).unwrap();
 
             self.start_validation_result_thread(exit_flag.clone(), validation_result_receiver);
             self.start_commit_queue_thread(exit_flag.clone(), commit_queue_receiver);
@@ -935,14 +957,17 @@ impl<
                 if !result_thread_exit.load(Ordering::Relaxed) {
                     result_thread_controller
                         .set_block_validation_result(block_validation_result.clone());
-                    let block = result_thread_controller
-                        .get_block_unchecked(&block_validation_result.block_id);
-                    result_thread_controller.on_block_validated(&block, &block_validation_result);
+                    if let Some(block) = result_thread_controller
+                        .get_block(&block_validation_result.block_id) {
+                            result_thread_controller.on_block_validated(&block, &block_validation_result);
+                        } else {
+                            error!("During validation result thread loop, received a block validation result for a block that is not in the BlockManager");
+                        }
+
                 } else {
                     break;
                 }
-            })
-            .unwrap();
+            }).unwrap();
     }
 
     fn start_commit_queue_thread(
@@ -983,8 +1008,7 @@ impl<
                 } else {
                     break;
                 }
-            })
-            .unwrap();
+            }).unwrap();
     }
 
     pub fn stop(&mut self) {
@@ -1013,14 +1037,8 @@ impl<'a> From<&'a TxnExecutionResult> for TransactionReceipt {
     }
 }
 
-struct ChainThread<
-    TEP: ExecutionPlatform + Clone,
-    PV: PermissionVerifier + Clone,
-    BS: BlockStore + Clone,
-    B: BatchIndex + Clone,
-    T: TransactionIndex + Clone,
-> {
-    chain_controller: ChainController<TEP, PV, BS, B, T>,
+struct ChainThread<TEP: ExecutionPlatform + Clone, PV: PermissionVerifier + Clone> {
+    chain_controller: ChainController<TEP, PV>,
     block_queue: Receiver<String>,
     exit: Arc<AtomicBool>,
 }
@@ -1029,16 +1047,11 @@ trait StopHandle: Clone {
     fn stop(&self);
 }
 
-impl<
-        TEP: ExecutionPlatform + Clone + 'static,
-        PV: PermissionVerifier + Clone + 'static,
-        BS: BlockStore + Clone + 'static,
-        B: BatchIndex + Clone + 'static,
-        T: TransactionIndex + Clone + 'static,
-    > ChainThread<TEP, PV, BS, B, T>
+impl<TEP: ExecutionPlatform + Clone + 'static, PV: PermissionVerifier + Clone + 'static>
+    ChainThread<TEP, PV>
 {
     fn new(
-        chain_controller: ChainController<TEP, PV, BS, B, T>,
+        chain_controller: ChainController<TEP, PV>,
         block_queue: Receiver<String>,
         exit_flag: Arc<AtomicBool>,
     ) -> Self {

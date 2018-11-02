@@ -17,8 +17,7 @@
 
 use std::iter::repeat;
 
-use crypto::digest::Digest;
-use crypto::sha2::Sha256;
+use hashlib::sha256_digest_str;
 use protobuf;
 
 use proto::identity::Policy;
@@ -109,8 +108,7 @@ impl IdentityView {
                 } else {
                     None
                 })
-            })
-            .and_then(|list_opt| {
+            }).and_then(|list_opt| {
                 if let Some(list) = list_opt {
                     for item in list.values() {
                         if item.name() == name {
@@ -204,9 +202,7 @@ fn policy_address(name: &str) -> String {
 }
 
 fn short_hash(s: &str, length: usize) -> String {
-    let mut sha = Sha256::new();
-    sha.input(s.as_bytes());
-    sha.result_str()[..length].to_string()
+    sha256_digest_str(s)[..length].to_string()
 }
 
 #[cfg(test)]
@@ -353,8 +349,7 @@ mod tests {
                     entry.set_field_type(Policy_EntryType::PERMIT_KEY);
                     entry.set_key(key.to_string());
                     entry
-                })
-                .collect(),
+                }).collect(),
         ));
 
         policy

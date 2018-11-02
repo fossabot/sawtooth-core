@@ -27,9 +27,7 @@ class TestService(unittest.TestCase):
         self.mock_stream = unittest.mock.Mock()
         self.service = ZmqService(
             stream=self.mock_stream,
-            timeout=10,
-            name='name',
-            version='version')
+            timeout=10)
 
     def _make_future(self, message_type, content):
         fut = Future('test')
@@ -46,19 +44,16 @@ class TestService(unittest.TestCase):
             ).SerializeToString())
 
         self.service.send_to(
-            peer_id=b'peer_id',
+            receiver_id=b'receiver_id',
             message_type='message_type',
             payload=b'payload')
 
         self.mock_stream.send.assert_called_with(
             message_type=Message.CONSENSUS_SEND_TO_REQUEST,
             content=consensus_pb2.ConsensusSendToRequest(
-                message=consensus_pb2.ConsensusPeerMessage(
-                    message_type='message_type',
-                    content=b'payload',
-                    name='name',
-                    version='version'),
-                peer_id=b'peer_id').SerializeToString())
+                message_type='message_type',
+                content=b'payload',
+                receiver_id=b'receiver_id').SerializeToString())
 
     def test_broadcast(self):
         self.mock_stream.send.return_value = self._make_future(
@@ -74,11 +69,8 @@ class TestService(unittest.TestCase):
         self.mock_stream.send.assert_called_with(
             message_type=Message.CONSENSUS_BROADCAST_REQUEST,
             content=consensus_pb2.ConsensusBroadcastRequest(
-                message=consensus_pb2.ConsensusPeerMessage(
-                    message_type='message_type',
-                    content=b'payload',
-                    name='name',
-                    version='version')).SerializeToString())
+                message_type='message_type',
+                content=b'payload').SerializeToString())
 
     def test_initialize_block(self):
         self.mock_stream.send.return_value = self._make_future(

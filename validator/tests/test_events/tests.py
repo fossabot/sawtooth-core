@@ -15,11 +15,15 @@
 
 # pylint: disable=protected-access
 
+import os
+import tempfile
 import unittest
 from unittest.mock import Mock
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 from sawtooth_validator.database.dict_database import DictDatabase
+from sawtooth_validator.database.native_lmdb import NativeLmdbDatabase
 from sawtooth_validator.journal.block_store import BlockStore
 from sawtooth_validator.journal.block_wrapper import BlockWrapper
 from sawtooth_validator.journal.event_extractors \
@@ -272,11 +276,15 @@ class ClientEventsUnsubscribeHandlerTest(unittest.TestCase):
 
 class ClientEventsGetRequestHandlerTest(unittest.TestCase):
     def setUp(self):
-        self.block_store = BlockStore(DictDatabase())
+        self.dir = tempfile.mkdtemp()
+        self.block_db = NativeLmdbDatabase(
+            os.path.join(self.dir, 'block.lmdb'),
+            BlockStore.create_index_configuration())
+        self.block_store = BlockStore(self.block_db)
         self.receipt_store = TransactionReceiptStore(DictDatabase())
         self._txn_ids_by_block_id = {}
         for block_id, blk_w, txn_ids in create_chain():
-            self.block_store[block_id] = blk_w
+            self.block_store.put_blocks([blk_w.block])
             self._txn_ids_by_block_id[block_id] = txn_ids
             for txn_id in txn_ids:
                 receipt = create_receipt(txn_id=txn_id,
@@ -386,6 +394,41 @@ class EventBroadcasterTest(unittest.TestCase):
         event_broadcaster.enable_subscriber("test_conn_id")
         event_broadcaster.chain_update(block, [])
 
+        event_list = events_pb2.EventList(
+            events=BlockEventExtractor(block).extract(
+                [create_block_commit_subscription()])).SerializeToString()
+        mock_service.send.assert_called_with(
+            validator_pb2.Message.CLIENT_EVENTS,
+            event_list, connection_id="test_conn_id", one_way=True)
+
+    def test_catchup_subscriber(self):
+        """Test that catch subscriber handles the case of:
+        - no blocks (i.e. the genesis block has not been produced or received
+        - a block that has some receipts exists and sends results
+        """
+        mock_service = Mock()
+        mock_block_store = MagicMock()
+        mock_block_store.chain_head = None
+        mock_block_store.get_predecessor_iter.return_value = []
+        mock_receipt_store = Mock()
+
+        event_broadcaster = EventBroadcaster(mock_service,
+                                             mock_block_store,
+                                             mock_receipt_store)
+
+        event_broadcaster.add_subscriber(
+            "test_conn_id", [create_block_commit_subscription()], [])
+
+        event_broadcaster.catchup_subscriber("test_conn_id")
+
+        mock_service.send.assert_not_called()
+
+        block = create_block()
+        mock_block_store.chain_head = block
+        mock_block_store.get_predecessor_iter.return_value = [block]
+        mock_block_store.__getitem__.return_value = block
+
+        event_broadcaster.catchup_subscriber("test_conn_id")
         event_list = events_pb2.EventList(
             events=BlockEventExtractor(block).extract(
                 [create_block_commit_subscription()])).SerializeToString()

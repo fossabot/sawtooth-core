@@ -21,11 +21,9 @@ from sawtooth_sdk.protobuf.validator_pb2 import Message
 
 
 class ZmqService(Service):
-    def __init__(self, stream, timeout, name, version):
+    def __init__(self, stream, timeout):
         self._stream = stream
         self._timeout = timeout
-        self._name = name
-        self._version = version
 
     def _send(self, request, message_type, response_type):
         response_bytes = self._stream.send(
@@ -40,16 +38,11 @@ class ZmqService(Service):
 
     # -- P2P --
 
-    def send_to(self, peer_id, message_type, payload):
-        message = consensus_pb2.ConsensusPeerMessage(
+    def send_to(self, receiver_id, message_type, payload):
+        request = consensus_pb2.ConsensusSendToRequest(
             message_type=message_type,
             content=payload,
-            name=self._name,
-            version=self._version)
-
-        request = consensus_pb2.ConsensusSendToRequest(
-            message=message,
-            peer_id=peer_id)
+            receiver_id=receiver_id)
 
         response = self._send(
             request=request,
@@ -61,13 +54,9 @@ class ZmqService(Service):
                 'Failed with status {}'.format(response.status))
 
     def broadcast(self, message_type, payload):
-        message = consensus_pb2.ConsensusPeerMessage(
+        request = consensus_pb2.ConsensusBroadcastRequest(
             message_type=message_type,
-            content=payload,
-            name=self._name,
-            version=self._version)
-
-        request = consensus_pb2.ConsensusBroadcastRequest(message=message)
+            content=payload)
 
         response = self._send(
             request=request,

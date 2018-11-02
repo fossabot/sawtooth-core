@@ -17,7 +17,6 @@
 
 use std::error;
 use std::fmt;
-use std::ops::Deref;
 use std::sync::mpsc::Receiver;
 
 use hex;
@@ -37,35 +36,7 @@ pub enum Update {
     Shutdown,
 }
 
-#[derive(Clone, Default, Eq, Hash, PartialEq, PartialOrd)]
-pub struct BlockId(Vec<u8>);
-impl Deref for BlockId {
-    type Target = Vec<u8>;
-
-    fn deref(&self) -> &Vec<u8> {
-        &self.0
-    }
-}
-impl From<BlockId> for Vec<u8> {
-    fn from(id: BlockId) -> Vec<u8> {
-        id.0
-    }
-}
-impl From<Vec<u8>> for BlockId {
-    fn from(v: Vec<u8>) -> BlockId {
-        BlockId(v)
-    }
-}
-impl AsRef<[u8]> for BlockId {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-impl fmt::Debug for BlockId {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", hex::encode(&self.0))
-    }
-}
+pub type BlockId = Vec<u8>;
 
 /// All information about a block that is relevant to consensus
 #[derive(Clone, Default)]
@@ -92,35 +63,7 @@ impl fmt::Debug for Block {
     }
 }
 
-#[derive(Clone, Default, PartialEq, Eq, Hash, PartialOrd)]
-pub struct PeerId(Vec<u8>);
-impl Deref for PeerId {
-    type Target = Vec<u8>;
-
-    fn deref(&self) -> &Vec<u8> {
-        &self.0
-    }
-}
-impl From<PeerId> for Vec<u8> {
-    fn from(id: PeerId) -> Vec<u8> {
-        id.0
-    }
-}
-impl From<Vec<u8>> for PeerId {
-    fn from(v: Vec<u8>) -> PeerId {
-        PeerId(v)
-    }
-}
-impl AsRef<[u8]> for PeerId {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-impl fmt::Debug for PeerId {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", hex::encode(&self.0))
-    }
-}
+pub type PeerId = Vec<u8>;
 
 /// Information about a peer that is relevant to consensus
 #[derive(Default, Debug)]
@@ -129,10 +72,26 @@ pub struct PeerInfo {
 }
 
 /// A consensus-related message sent between peers
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct PeerMessage {
-    pub message_type: String,
+    pub header: PeerMessageHeader,
+    pub header_bytes: Vec<u8>,
+    pub header_signature: Vec<u8>,
     pub content: Vec<u8>,
+}
+
+/// A header associated with a consensus-related message sent from a peer, can be used to verify
+/// the origin of the message
+#[derive(Default, Debug, Clone)]
+pub struct PeerMessageHeader {
+    /// The public key of the validator where this message originated
+    ///
+    /// NOTE: This may not be the validator that sent the message
+    pub signer_id: Vec<u8>,
+    pub content_sha512: Vec<u8>,
+    pub message_type: String,
+    pub name: String,
+    pub version: String,
 }
 
 /// Engine is the only trait that needs to be implemented when adding a new consensus engine.
@@ -169,7 +128,7 @@ pub trait Engine {
         updates: Receiver<Update>,
         service: Box<Service>,
         startup_state: StartupState,
-    );
+    ) -> Result<(), Error>;
 
     /// Get the version of this engine
     fn version(&self) -> String;
@@ -285,7 +244,7 @@ pub mod tests {
             updates: Receiver<Update>,
             _service: Box<Service>,
             _startup_state: StartupState,
-        ) {
+        ) -> Result<(), Error> {
             (*self.calls.lock().unwrap()).push("start".into());
             loop {
                 match updates.recv_timeout(Duration::from_millis(100)) {
@@ -330,6 +289,8 @@ pub mod tests {
                     }
                 }
             }
+
+            Ok(())
         }
         fn version(&self) -> String {
             "0".into()
@@ -368,7 +329,9 @@ pub mod tests {
             .unwrap();
         let handle = thread::spawn(move || {
             let svc = Box::new(MockService {});
-            mock_engine.start(receiver, svc, Default::default());
+            mock_engine
+                .start(receiver, svc, Default::default())
+                .unwrap();
         });
         sender.send(Update::Shutdown).unwrap();
         handle.join().unwrap();

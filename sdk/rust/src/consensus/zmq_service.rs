@@ -38,98 +38,14 @@ fn generate_correlation_id() -> String {
     rand::thread_rng().gen_ascii_chars().take(LENGTH).collect()
 }
 
-pub fn register(
-    sender: &mut MessageSender,
-    timeout: Duration,
-    name: String,
-    version: String,
-) -> Result<(Block, Vec<PeerInfo>), Error> {
-    let mut request = ConsensusRegisterRequest::new();
-    request.set_name(name);
-    request.set_version(version);
-    let request = request.write_to_bytes()?;
-
-    let mut msg = sender
-        .send(
-            Message_MessageType::CONSENSUS_REGISTER_REQUEST,
-            &generate_correlation_id(),
-            &request,
-        )?
-        .get_timeout(timeout)?;
-
-    let ret: Result<(Block, Vec<PeerInfo>), Error>;
-
-    // Keep trying to register until the response is something other
-    // than NOT_READY.
-    loop {
-        match msg.get_message_type() {
-            Message_MessageType::CONSENSUS_REGISTER_RESPONSE => {
-                let mut response: ConsensusRegisterResponse =
-                    protobuf::parse_from_bytes(msg.get_content())?;
-
-                match response.get_status() {
-                    ConsensusRegisterResponse_Status::OK => {
-                        ret = Ok((
-                            response.take_chain_head().into(),
-                            response
-                                .take_peers()
-                                .into_iter()
-                                .map(|info| info.into())
-                                .collect(),
-                        ));
-
-                        break;
-                    }
-                    ConsensusRegisterResponse_Status::NOT_READY => {
-                        msg = sender
-                            .send(
-                                Message_MessageType::CONSENSUS_REGISTER_REQUEST,
-                                &generate_correlation_id(),
-                                &request,
-                            )?
-                            .get_timeout(timeout)?;
-
-                        continue;
-                    }
-                    status => {
-                        ret = Err(Error::ReceiveError(format!(
-                            "Registration failed with status {:?}",
-                            status
-                        )));
-
-                        break;
-                    }
-                };
-            }
-            unexpected => {
-                ret = Err(Error::ReceiveError(format!(
-                    "Received unexpected message type: {:?}",
-                    unexpected
-                )));
-
-                break;
-            }
-        }
-    }
-
-    ret
-}
-
 pub struct ZmqService {
     sender: ZmqMessageSender,
     timeout: Duration,
-    name: String,
-    version: String,
 }
 
 impl ZmqService {
-    pub fn new(sender: ZmqMessageSender, timeout: Duration, name: String, version: String) -> Self {
-        ZmqService {
-            sender,
-            timeout,
-            name,
-            version,
-        }
+    pub fn new(sender: ZmqMessageSender, timeout: Duration) -> Self {
+        ZmqService { sender, timeout }
     }
 
     /// Serialize and send a request, wait for the default timeout, and receive and parse an
@@ -179,15 +95,10 @@ impl Service for ZmqService {
         message_type: &str,
         payload: Vec<u8>,
     ) -> Result<(), Error> {
-        let mut message = ConsensusPeerMessage::new();
-        message.set_message_type(message_type.into());
-        message.set_content(payload);
-        message.set_name(self.name.clone());
-        message.set_version(self.version.clone());
-
         let mut request = ConsensusSendToRequest::new();
-        request.set_message(message);
-        request.set_peer_id((*peer).clone().into());
+        request.set_content(payload);
+        request.set_message_type(message_type.into());
+        request.set_receiver_id((*peer).clone().into());
 
         let response: ConsensusSendToResponse = self.rpc(
             &request,
@@ -199,12 +110,9 @@ impl Service for ZmqService {
     }
 
     fn broadcast(&mut self, message_type: &str, payload: Vec<u8>) -> Result<(), Error> {
-        let mut message = ConsensusPeerMessage::new();
-        message.set_message_type(message_type.into());
-        message.set_content(payload);
-
         let mut request = ConsensusBroadcastRequest::new();
-        request.set_message(message);
+        request.set_content(payload);
+        request.set_message_type(message_type.into());
 
         let response: ConsensusBroadcastResponse = self.rpc(
             &request,
@@ -516,8 +424,7 @@ mod tests {
         ) => {
             let mut response = $rep;
             response.set_status($status);
-            let (_, _): (_, $req_type) =
-                recv_rep($socket, $req_msg_type, response, $rep_msg_type);
+            let (_, _): (_, $req_type) = recv_rep($socket, $req_msg_type, response, $rep_msg_type);
         };
     }
 
@@ -533,8 +440,7 @@ mod tests {
         let svc_thread = thread::spawn(move || {
             let connection = ZmqMessageConnection::new(&addr);
             let (sender, _) = connection.create();
-            let mut svc =
-                ZmqService::new(sender, Duration::from_secs(10), "mock".into(), "0".into());
+            let mut svc = ZmqService::new(sender, Duration::from_secs(10));
 
             svc.send_to(&Default::default(), Default::default(), Default::default())
                 .unwrap();

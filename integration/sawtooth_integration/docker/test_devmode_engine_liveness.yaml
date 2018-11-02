@@ -134,7 +134,8 @@ services:
     image: sawtooth-devmode$INSTALL_TYPE:$ISOLATION_ID
     volumes:
       - $SAWTOOTH_CORE:/project/sawtooth-core
-    command: devmode-rust --connect tcp://validator-4:5005 -vv
+    command: |
+      bash -c "sleep 15 && devmode-rust --connect tcp://validator-4:5005 -v"
     stop_signal: SIGKILL
 
   validator-0:
@@ -153,6 +154,8 @@ services:
       - 8800
       - 5005
     working_dir: /root
+    environment:
+      RUST_BACKTRACE: full
     command: "bash -c \"\
         sawadm keygen && \
         sawset genesis \
@@ -161,8 +164,8 @@ services:
         sawset proposal create \
           -k /etc/sawtooth/keys/validator.priv \
           sawtooth.consensus.algorithm=None \
-          sawtooth.consensus.min_wait_time=1 \
-          sawtooth.consensus.max_wait_time=3 \
+          sawtooth.consensus.min_wait_time=2 \
+          sawtooth.consensus.max_wait_time=4 \
           -o config.batch && \
         sawadm genesis \
           config-genesis.batch config.batch && \
@@ -192,6 +195,8 @@ services:
       - 4004
       - 8800
       - 5005
+    environment:
+      RUST_BACKTRACE: full
     command: "bash -c \"\
         sawadm keygen && \
         sawtooth-validator -v \
@@ -221,6 +226,8 @@ services:
       - 4004
       - 8800
       - 5005
+    environment:
+      RUST_BACKTRACE: full
     command: "bash -c \"\
         sawadm keygen && \
         sawtooth-validator -v \
@@ -250,6 +257,8 @@ services:
       - 4004
       - 8800
       - 5005
+    environment:
+      RUST_BACKTRACE: full
     command: "bash -c \"\
         sawadm keygen && \
         sawtooth-validator -v \
@@ -279,6 +288,8 @@ services:
       - 4004
       - 8800
       - 5005
+    environment:
+      RUST_BACKTRACE: full
     command: "bash -c \"\
         sawadm keygen && \
         sawtooth-validator -v \
@@ -289,7 +300,7 @@ services:
             --peering dynamic \
             --seeds tcp://validator-0:8800 \
             --scheduler parallel \
-            --fork-cache-keep-time 0 \
+            --fork-cache-keep-time 30 \
     \""
     stop_signal: SIGKILL
 
