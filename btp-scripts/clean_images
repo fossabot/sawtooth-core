@@ -8,7 +8,9 @@ else
 	export TAG=$1
 	echo Cleaning images with tag $TAG
 fi
-
+for container in `docker ps -a |grep ${TAG} | awk '{print $1}'`; do
+	docker rm -f $container
+done
 for img in `docker images |grep ${TAG} | awk '{ print $1":"$2 }'`; do
 	docker rmi $img
 done

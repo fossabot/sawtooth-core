@@ -22,6 +22,7 @@ properties([[$class: 'BuildDiscarderProperty', strategy:
 
 node ('master') {
     timestamps {
+	
 	// Create a unique workspace so Jenkins doesn't reuse an existing one
 	ws("workspace/${env.BUILD_TAG}") {
             stage("Clone Repo") {
@@ -53,7 +54,7 @@ node ('master') {
             }
 	    
             // Set the ISOLATION_ID environment variable for the whole pipeline
-            env.ISOLATION_ID = sh(returnStdout: true, script: 'echo $BUILD_TAG | sha256sum | cut -c1-64').trim()
+            env.ISOLATION_ID = sh(returnStdout: true, script: 'echo $BUILD_TAG |sed -e \'s/-[0-9].*$//\'| sha256sum | cut -c1-64').trim()
 	    env.COMPOSE_PROJECT_NAME = sh(returnStdout: true, script: 'printf $BUILD_TAG | sha256sum | cut -c1-64').trim()
 	    env.ORGANIZATION = 'blockchaintp'
 	    env.VERSION = sh(returnStdout: true, script: 'bin/get_version').trim()
@@ -70,12 +71,17 @@ node ('master') {
 		sh 'docker-compose -f docker/compose/sawtooth-build.yaml up'
 		sh 'docker-compose -f docker/compose/sawtooth-build.yaml down'
             }
-	    
-            stage("Run Lint") {
-		sh 'docker-compose -f docker/compose/run-lint.yaml up --abort-on-container-exit --exit-code-from lint-python lint-python'
-		sh 'docker-compose -f docker/compose/run-lint.yaml up --abort-on-container-exit --exit-code-from lint-rust lint-rust'
-		sh 'docker-compose -f docker/compose/run-lint.yaml up --abort-on-container-exit --exit-code-from lint-validator lint-validator'
-            }
+
+	    try {
+		stage("Run Lint") {
+		    sh 'docker-compose -f docker/compose/run-lint.yaml up --abort-on-container-exit --exit-code-from lint-python lint-python'
+		    sh 'docker-compose -f docker/compose/run-lint.yaml up --abort-on-container-exit --exit-code-from lint-go lint-go'
+		    sh 'docker-compose -f docker/compose/run-lint.yaml up --abort-on-container-exit --exit-code-from lint-rust lint-rust'
+		    sh 'docker-compose -f docker/compose/run-lint.yaml up --abort-on-container-exit --exit-code-from lint-validator lint-validator'
+		}
+	    } catch (exc) {
+		currentBuild.result = 'UNSTABLE'
+	    }
 	    
 	    try {
 		stage("Build Installed Docker Images") {
