@@ -30,6 +30,7 @@ node ('master') {
 		sh 'git fetch --tag'
             }
 	    
+            try { 
             stage("Check for Signed-Off Commits") {
 		sh '''#!/bin/bash -l
                 if [ -v CHANGE_URL ] ;
@@ -51,7 +52,9 @@ node ('master') {
                     unset IFS;
                 fi
             '''
-            }
+	    } catch (exc) {
+		currentBuild.result = 'UNSTABLE'
+	    }
 	    
             // Set the ISOLATION_ID environment variable for the whole pipeline
             env.ISOLATION_ID = sh(returnStdout: true, script: 'echo $BUILD_TAG |sed -e \'s/-[0-9].*$//\'| sha256sum | cut -c1-64').trim()
