@@ -52,6 +52,7 @@ node ('master') {
                     unset IFS;
                 fi
             '''
+            }
 	    } catch (exc) {
 		currentBuild.result = 'UNSTABLE'
 	    }
