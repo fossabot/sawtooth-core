@@ -30,28 +30,32 @@ node ('master') {
 		sh 'git fetch --tag'
             }
 	    
-            stage("Check for Signed-Off Commits") {
-		sh '''#!/bin/bash -l
-                if [ -v CHANGE_URL ] ;
-                then
-                    temp_url="$(echo $CHANGE_URL |sed s#github.com/#api.github.com/repos/#)/commits"
-                    pull_url="$(echo $temp_url |sed s#pull#pulls#)"
+            try {
+		stage("Check for Signed-Off Commits") {
+			sh '''#!/bin/bash -l
+	                if [ -v CHANGE_URL ] ;
+       	         	then
+       	             		temp_url="$(echo $CHANGE_URL |sed s#github.com/#api.github.com/repos/#)/commits"
+                    		pull_url="$(echo $temp_url |sed s#pull#pulls#)"
 
-                    IFS=$'\n'
-                    for m in $(curl -s "$pull_url" | grep "message") ; do
-                        if echo "$m" | grep -qi signed-off-by:
-                        then
-                          continue
-                        else
-                          echo "FAIL: Missing Signed-Off Field"
-                          echo "$m"
-                          exit 1
-                        fi
-                    done
-                    unset IFS;
-                fi
-            '''
-            }
+                    		IFS=$'\n'
+                    		for m in $(curl -s "$pull_url" | grep "message") ; do
+                        		if echo "$m" | grep -qi signed-off-by:
+                        		then
+                          			continue
+                        		else
+                          			echo "FAIL: Missing Signed-Off Field"
+                          			echo "$m"
+                          			exit 1
+                        		fi
+                    		done
+                    		unset IFS;
+                	fi
+            		'''
+            	}
+	    } catch (exc) {
+		currentBuild.result = 'UNSTABLE'
+	    }
 	    
             // Set the ISOLATION_ID environment variable for the whole pipeline
             env.ISOLATION_ID = sh(returnStdout: true, script: 'echo $BUILD_TAG |sed -e \'s/-[0-9].*$//\'| sha256sum | cut -c1-64').trim()
