@@ -1,5 +1,5 @@
-
 ![Hyperledger Sawtooth](images/sawtooth_logo_light_blue-small.png)
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fblockchaintp%2Fsawtooth-core.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fblockchaintp%2Fsawtooth-core?ref=badge_shield)
 
 Hyperledger Sawtooth
 -------------
@@ -39,3 +39,7 @@ a Creative Commons Attribution 4.0 International License.  You may obtain a copy
 license at: http://creativecommons.org/licenses/by/4.0/.
 
 ![Open Source Award Badge](images/rookies16-small.png)
+
+
+## License
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fblockchaintp%2Fsawtooth-core.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2Fblockchaintp%2Fsawtooth-core?ref=badge_large)
